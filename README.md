@@ -1,0 +1,2 @@
+# mein-aktien-scanner
+Aktien
