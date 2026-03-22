@@ -4,9 +4,9 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-st.set_page_config(page_title="Aktien-Ampel Pro", page_icon="🚥", layout="wide")
+st.set_page_config(page_title="Aktien-Scanner Pro", page_icon="🚥", layout="wide")
 
-st.title("🚥 Aktien-Scanner mit Analysten-Ampel")
+st.title("🚥 Aktien-Check: Analyse & News")
 st.markdown("---")
 
 # Seitenleiste
@@ -24,12 +24,11 @@ def get_ticker(search_term):
         return None, None
 
 if st.sidebar.button("Analyse starten"):
-    with st.spinner('Lade Marktdaten...'):
+    with st.spinner('Lade Daten...'):
         symbol, name = get_ticker(user_input)
         
         if symbol:
             ticker_obj = yf.Ticker(symbol)
-            # 1. Kursdaten laden
             data = ticker_obj.history(period="5y")
             
             if not data.empty:
@@ -38,48 +37,32 @@ if st.sidebar.button("Analyse starten"):
                 
                 st.subheader(f"Analyse für: {name} ({symbol})")
                 
-                # --- DIE NEUE AMPEL LOGIK (SICHERER) ---
-                st.markdown("### 🚦 Analysten-Ampel")
-                
-                # Wir versuchen die Empfehlung aus den 'info' Daten zu lesen
+                # --- ANALYSTEN AMPEL ---
                 try:
                     info = ticker_obj.info
-                    rec_key = info.get('recommendationKey', 'Keine Daten').replace('_', ' ').title()
-                    target_price = info.get('targetMeanPrice', 'N/A')
-                    
-                    col_a, col_b = st.columns(2)
-                    
-                    # Farbauswahl für die Ampel
-                    if "Buy" in rec_key:
-                        st.success(f"🟢 **Empfehlung: {rec_key}**")
-                    elif "Sell" in rec_key:
-                        st.error(f"🔴 **Empfehlung: {rec_key}**")
-                    else:
-                        st.warning(f"🟡 **Empfehlung: {rec_key}**")
-                        
-                    st.write(f"Durchschnittliches Kursziel der Profis: **{target_price} $**")
+                    rec_key = info.get('recommendationKey', 'N/A').replace('_', ' ').title()
+                    st.markdown(f"**Analysten-Meinung:** {rec_key}")
                 except:
-                    st.info("Analysten-Zusammenfassung aktuell nicht verfügbar.")
+                    st.info("Keine Empfehlungs-Daten.")
 
-                # --- DER CHART ---
+                # --- CHART ---
                 plot_data = data['Close'].tail(252 if zeitraum == "1y" else 504 if zeitraum == "2y" else 1260)
-                vol_data = data['Volume'].loc[plot_data.index]
-                
                 fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.05, row_heights=[0.7, 0.3])
-                fig.add_trace(go.Scatter(x=plot_data.index, y=plot_data, name='Preis', line=dict(color='#1f77b4')), row=1, col=1)
-                fig.add_trace(go.Bar(x=plot_data.index, y=vol_data, name='Volumen', marker_color='#d3d3d3'), row=2, col=1)
-                
-                fig.update_layout(height=600, template="plotly_white", showlegend=False)
+                fig.add_trace(go.Scatter(x=plot_data.index, y=plot_data, name='Preis'), row=1, col=1)
+                fig.add_trace(go.Bar(x=plot_data.index, y=data['Volume'].loc[plot_data.index], name='Volumen', marker_color='lightgray'), row=2, col=1)
+                fig.update_layout(height=500, template="plotly_white", showlegend=False)
                 st.plotly_chart(fig, use_container_width=True)
 
-                # --- TREND-CHECK ---
+                # --- NEWS SEKTION ---
                 st.markdown("---")
-                if current_price > sma200:
-                    st.success(f"📈 **Trend:** Die Aktie ist im Aufwärtstrend (über SMA 200 von {sma200:.2f} $)")
+                st.subheader(f"📰 Aktuelle News zu {name}")
+                news = ticker_obj.news
+                if news:
+                    for item in news[:5]: # Zeige die Top 5 News
+                        with st.expander(item['title']):
+                            st.write(f"**Quelle:** {item['publisher']}")
+                            st.write(f"**Link:** [Zum Artikel]({item['link']})")
                 else:
-                    st.error(f"📉 **Trend:** Die Aktie ist im Abwärtstrend (unter SMA 200 von {sma200:.2f} $)")
-
+                    st.write("Keine aktuellen News gefunden.")
             else:
                 st.error("Keine Kursdaten gefunden.")
-        else:
-            st.error("Aktie wurde nicht gefunden.")
