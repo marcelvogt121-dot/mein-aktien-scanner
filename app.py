@@ -1,18 +1,18 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
-import plotly.graph_objects as go # Neu für fortgeschrittene Charts
-from plotly.subplots import make_subplots # Neu für Subplots
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
-st.set_page_config(page_title="Aktien-Volumen-Chart", page_icon="📈", layout="wide")
+st.set_page_config(page_title="Aktien-Ampel Pro", page_icon="🚥", layout="wide")
 
-st.title("📈 Profi-Chart: Preis, SMA 200 & Volumen integriert")
+st.title("🚥 Aktien-Scanner mit Analysten-Ampel")
 st.markdown("---")
 
 # Seitenleiste
-st.sidebar.header("Suche & Zeitraum")
+st.sidebar.header("Suche")
 user_input = st.sidebar.text_input("Name oder Kürzel", "TSLA")
-zeitraum = st.sidebar.selectbox("Zeitraum", ["1y", "2y", "5y", "max"], index=0)
+zeitraum = st.sidebar.selectbox("Zeitraum", ["1y", "2y", "5y"], index=0)
 
 def get_ticker(search_term):
     try:
@@ -24,84 +24,60 @@ def get_ticker(search_term):
         return None, None
 
 if st.sidebar.button("Analyse starten"):
-    with st.spinner('Marktdaten werden geladen...'):
+    with st.spinner('Lade Marktdaten & Analysten-Meinungen...'):
         symbol, name = get_ticker(user_input)
+        ticker_obj = yf.Ticker(symbol)
         
         if symbol:
-            st.subheader(f"Analyse für: {name} ({symbol})")
-            
-            # Daten laden (immer genug für SMA 200)
-            data = yf.download(symbol, period="5y", auto_adjust=True)
+            # 1. Kursdaten laden
+            data = ticker_obj.history(period="5y")
             
             if not data.empty:
-                # Daten-Extraktion
-                if isinstance(data.columns, pd.MultiIndex):
-                    close_prices = data['Close'][symbol]
-                    volume_data = data['Volume'][symbol]
+                current_price = data['Close'].iloc[-1]
+                sma200 = data['Close'].rolling(window=200).mean().iloc[-1]
+                
+                # 2. Analysten-Empfehlungen abrufen
+                rec = ticker_obj.recommendations
+                
+                st.subheader(f"Analyse für: {name} ({symbol})")
+                
+                # --- DIE AMPEL LOGIK ---
+                st.markdown("### 🚦 Analysten-Ampel")
+                if rec is not None and not rec.empty:
+                    # Wir nehmen die aktuellste Zeile der Empfehlungen
+                    latest_rec = rec.iloc[-1]
+                    buy = latest_rec.get('strongBuy', 0) + latest_rec.get('buy', 0)
+                    hold = latest_rec.get('hold', 0)
+                    sell = latest_rec.get('sell', 0) + latest_rec.get('strongSell', 0)
+                    
+                    col_a, col_b, col_c = st.columns(3)
+                    col_a.metric("Kaufen", f"{buy} Profis")
+                    col_b.metric("Halten", f"{hold} Profis")
+                    col_c.metric("Verkaufen", f"{sell} Profis")
+
+                    if buy > sell and buy > hold:
+                        st.success("🟢 **AMPELEMPFEHLUNG: KAUFEN** - Die Mehrheit der Analysten ist optimistisch.")
+                    elif sell > buy:
+                        st.error("🔴 **AMPELEMPFEHLUNG: VERKAUFEN** - Die Experten raten zur Vorsicht.")
+                    else:
+                        st.warning("🟡 **AMPELEMPFEHLUNG: HALTEN** - Es gibt aktuell keine klare Richtung.")
                 else:
-                    close_prices = data['Close']
-                    volume_data = data['Volume']
-                
-                # Berechnung
-                current_price = float(close_prices.iloc[-1])
-                sma200 = close_prices.rolling(window=200).mean()
-                current_sma200 = float(sma200.iloc[-1])
-                
-                # Filterung für den gewählten Zeitraum
-                if zeitraum == "1y": plot_data = close_prices.tail(252); vol_data = volume_data.tail(252)
-                elif zeitraum == "2y": plot_data = close_prices.tail(504); vol_data = volume_data.tail(504)
-                elif zeitraum == "5y": plot_data = close_prices.tail(1260); vol_data = volume_data.tail(1260)
-                else: plot_data = close_prices; vol_data = volume_data
-                
-                sma200_filtered = sma200.loc[plot_data.index]
+                    st.info("Keine aktuellen Analysten-Daten für dieses Symbol verfügbar.")
 
-                # --- KOMBINEIRTER CHART MIT PLOTLY ---
-                st.write("### Kursverlauf mit integriertem Volumen")
-                
-                # Erstelle Subplots: Preis oben (größer), Volumen unten (kleiner)
-                fig = make_subplots(rows=2, cols=1, shared_xaxes=True, 
-                                   vertical_spacing=0.03, subplot_titles=(f'{zeitraum}-Chart', 'Volumen'), 
-                                   row_heights=[0.7, 0.3])
-
-                # 1. Preis-Linie (Row 1)
-                fig.add_trace(go.Scatter(x=plot_data.index, y=plot_data, name='Preis', 
-                                         line=dict(color='blue', width=2)), row=1, col=1)
-                
-                # 2. SMA 200-Linie (Row 1)
-                fig.add_trace(go.Scatter(x=sma200_filtered.index, y=sma200_filtered, name='SMA 200', 
-                                         line=dict(color='orange', width=1.5, dash='dash')), row=1, col=1)
-
-                # 3. Volumen-Balken (Row 2) - Farbe je nach Preisbewegung
-                colors = ['green' if plot_data.iloc[i] >= plot_data.iloc[i-1] else 'red' for i in range(1, len(plot_data))]
-                colors.insert(0, 'gray') # Erste Farbe
-                
-                fig.add_trace(go.Bar(x=vol_data.index, y=vol_data, name='Volumen', 
-                                     marker=dict(color=colors)), row=2, col=1)
-
-                # Layout-Anpassungen (Achsenbeschriftungen, Hover-Effekte)
-                fig.update_layout(xaxis2_title='Datum', yaxis1_title='Preis ($)', yaxis2_title='Volumen',
-                                  hovermode='x unified', height=600)
-                
+                # --- DER CHART ---
+                plot_data = data['Close'].tail(252 if zeitraum == "1y" else 504 if zeitraum == "2y" else 1260)
+                fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.05, row_heights=[0.7, 0.3])
+                fig.add_trace(go.Scatter(x=plot_data.index, y=plot_data, name='Preis'), row=1, col=1)
+                fig.add_trace(go.Bar(x=plot_data.index, y=data['Volume'].loc[plot_data.index], name='Volumen'), row=2, col=1)
+                fig.update_layout(height=500, template="plotly_white")
                 st.plotly_chart(fig, use_container_width=True)
 
-                # --- METRIKEN ---
+                # --- FAZIT ---
                 st.markdown("---")
-                col1, col2, col3 = st.columns(3)
-                col1.metric("Kurs aktuell", f"{current_price:.2f} $")
-                col2.metric("SMA 200 (Durchschnitt)", f"{current_sma200:.2f} $")
-                col3.metric("Trend", "Aufwärts ✅" if current_price > current_sma200 else "Abwärts 🔴")
-
-                # --- FAZIT-BOX ---
-                st.subheader("💡 Fazit")
-                if current_price > current_sma200:
-                    st.success(f"🟢 **Trend Folger:** {name} ist im Aufwärtstrend (über SMA 200).")
+                if current_price > sma200:
+                    st.write("✅ **Trend-Check:** Die Aktie notiert über ihrem Jahresdurchschnitt (Aufwärtstrend).")
                 else:
-                    st.error(f"🔴 **VORSICHT:** Die Aktie notiert unter ihrem Jahresdurchschnitt (Abwärtstrend).")
+                    st.write("❌ **Trend-Check:** Die Aktie notiert unter ihrem Jahresdurchschnitt (Abwärtstrend).")
 
             else:
                 st.error("Keine Daten gefunden.")
-        else:
-            st.error("Aktie wurde nicht gefunden.")
-
-st.sidebar.markdown("---")
-st.sidebar.write("📖 **Profi-Tipp:** Steigt der Kurs bei **hohem Volumen** (grüne Balken), ist das ein starkes Kaufsignal. Fällt er bei hohem Volumen (rote Balken), ist Vorsicht geboten.")
