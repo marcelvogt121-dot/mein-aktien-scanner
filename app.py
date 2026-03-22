@@ -1,16 +1,18 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
+import plotly.graph_objects as go # Neu für fortgeschrittene Charts
+from plotly.subplots import make_subplots # Neu für Subplots
 
-st.set_page_config(page_title="Aktien-Profi-Scanner", page_icon="📈", layout="wide")
+st.set_page_config(page_title="Aktien-Volumen-Chart", page_icon="📈", layout="wide")
 
-st.title("📈 Mein Profi-Scanner: Trends & Volumen")
+st.title("📈 Profi-Chart: Preis, SMA 200 & Volumen integriert")
 st.markdown("---")
 
 # Seitenleiste
-st.sidebar.header("Suche & Filter")
-user_input = st.sidebar.text_input("Name oder Kürzel der Aktie", "TSLA")
-zeitraum = st.sidebar.selectbox("Zeitraum für Chart", ["1y", "2y", "5y", "max"], index=0)
+st.sidebar.header("Suche & Zeitraum")
+user_input = st.sidebar.text_input("Name oder Kürzel", "TSLA")
+zeitraum = st.sidebar.selectbox("Zeitraum", ["1y", "2y", "5y", "max"], index=0)
 
 def get_ticker(search_term):
     try:
@@ -21,15 +23,14 @@ def get_ticker(search_term):
     except:
         return None, None
 
-# Der Button triggert die gesamte Berechnung neu
 if st.sidebar.button("Analyse starten"):
-    with st.spinner('Marktdaten werden frisch geladen...'):
+    with st.spinner('Marktdaten werden geladen...'):
         symbol, name = get_ticker(user_input)
         
         if symbol:
             st.subheader(f"Analyse für: {name} ({symbol})")
             
-            # Wichtig: 'period' auf 5y lassen, damit SMA 200 immer berechnet werden kann
+            # Daten laden (immer genug für SMA 200)
             data = yf.download(symbol, period="5y", auto_adjust=True)
             
             if not data.empty:
@@ -41,62 +42,66 @@ if st.sidebar.button("Analyse starten"):
                     close_prices = data['Close']
                     volume_data = data['Volume']
                 
-                # Aktuelle Werte
+                # Berechnung
                 current_price = float(close_prices.iloc[-1])
                 sma200 = close_prices.rolling(window=200).mean()
                 current_sma200 = float(sma200.iloc[-1])
                 
-                # RSI Berechnung
-                delta = close_prices.diff()
-                gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-                loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-                rs = gain / loss
-                rsi = 100 - (100 / (1 + rs))
-                last_rsi = float(rsi.iloc[-1])
-
-                # Metriken in Echtzeit
-                c1, c2, c3 = st.columns(3)
-                c1.metric("Kurs", f"{current_price:.2f} $")
-                c2.metric("SMA 200 (1J-Schnitt)", f"{current_sma200:.2f} $")
-                c3.metric("RSI (Stimmung)", f"{last_rsi:.2f}")
-
-                # Chart-Bereich (Filterung je nach Auswahl)
-                if zeitraum == "1y": plot_data = close_prices.tail(252)
-                elif zeitraum == "2y": plot_data = close_prices.tail(504)
-                elif zeitraum == "5y": plot_data = close_prices.tail(1260)
-                else: plot_data = close_prices
+                # Filterung für den gewählten Zeitraum
+                if zeitraum == "1y": plot_data = close_prices.tail(252); vol_data = volume_data.tail(252)
+                elif zeitraum == "2y": plot_data = close_prices.tail(504); vol_data = volume_data.tail(504)
+                elif zeitraum == "5y": plot_data = close_prices.tail(1260); vol_data = volume_data.tail(1260)
+                else: plot_data = close_prices; vol_data = volume_data
                 
-                st.write("### Preisverlauf & SMA 200")
-                # Wir zeigen den Preis und den gleitenden Durchschnitt im selben Chart
-                st.line_chart(pd.DataFrame({
-                    "Preis": plot_data, 
-                    "SMA 200": sma200.loc[plot_data.index]
-                }))
-                
-                st.write("### Handelsvolumen")
-                st.bar_chart(volume_data.loc[plot_data.index])
+                sma200_filtered = sma200.loc[plot_data.index]
 
-                # DAS FAZIT (Jetzt fest in der Schleife)
+                # --- KOMBINEIRTER CHART MIT PLOTLY ---
+                st.write("### Kursverlauf mit integriertem Volumen")
+                
+                # Erstelle Subplots: Preis oben (größer), Volumen unten (kleiner)
+                fig = make_subplots(rows=2, cols=1, shared_xaxes=True, 
+                                   vertical_spacing=0.03, subplot_titles=(f'{zeitraum}-Chart', 'Volumen'), 
+                                   row_heights=[0.7, 0.3])
+
+                # 1. Preis-Linie (Row 1)
+                fig.add_trace(go.Scatter(x=plot_data.index, y=plot_data, name='Preis', 
+                                         line=dict(color='blue', width=2)), row=1, col=1)
+                
+                # 2. SMA 200-Linie (Row 1)
+                fig.add_trace(go.Scatter(x=sma200_filtered.index, y=sma200_filtered, name='SMA 200', 
+                                         line=dict(color='orange', width=1.5, dash='dash')), row=1, col=1)
+
+                # 3. Volumen-Balken (Row 2) - Farbe je nach Preisbewegung
+                colors = ['green' if plot_data.iloc[i] >= plot_data.iloc[i-1] else 'red' for i in range(1, len(plot_data))]
+                colors.insert(0, 'gray') # Erste Farbe
+                
+                fig.add_trace(go.Bar(x=vol_data.index, y=vol_data, name='Volumen', 
+                                     marker=dict(color=colors)), row=2, col=1)
+
+                # Layout-Anpassungen (Achsenbeschriftungen, Hover-Effekte)
+                fig.update_layout(xaxis2_title='Datum', yaxis1_title='Preis ($)', yaxis2_title='Volumen',
+                                  hovermode='x unified', height=600)
+                
+                st.plotly_chart(fig, use_container_width=True)
+
+                # --- METRIKEN ---
                 st.markdown("---")
-                st.subheader("💡 Fazit der Analyse")
-                
+                col1, col2, col3 = st.columns(3)
+                col1.metric("Kurs aktuell", f"{current_price:.2f} $")
+                col2.metric("SMA 200 (Durchschnitt)", f"{current_sma200:.2f} $")
+                col3.metric("Trend", "Aufwärts ✅" if current_price > current_sma200 else "Abwärts 🔴")
+
+                # --- FAZIT-BOX ---
+                st.subheader("💡 Fazit")
                 if current_price > current_sma200:
-                    if last_rsi < 35:
-                        st.success(f"✅ **STARKES SIGNAL:** {name} ist im Aufwärtstrend (über SMA 200), aber gerade kurzfristig extrem günstig (RSI: {last_rsi:.1f}).")
-                    elif last_rsi > 70:
-                        st.warning(f"⚠️ **ÜBERHITZT:** Der Trend ist zwar positiv, aber die Aktie ist aktuell zu teuer (RSI: {last_rsi:.1f}). Warte auf einen Rücksetzer.")
-                    else:
-                        st.info(f"⚖️ **TREND FOLGEN:** Die Aktie ist stabil im Aufwärtstrend. Kein extremes RSI-Signal.")
+                    st.success(f"🟢 **Trend Folger:** {name} ist im Aufwärtstrend (über SMA 200).")
                 else:
-                    if last_rsi < 30:
-                        st.error(f"🔴 **VORSICHT (FALLING KNIFE):** Der RSI ist zwar sehr niedrig ({last_rsi:.1f}), aber die Aktie ist im Abwärtstrend (unter SMA 200). Ein Einstieg ist riskant!")
-                    else:
-                        st.error(f"🔴 **ABWÄRTSTREND:** Keine Kaufempfehlung. Die Aktie notiert unter ihrem Jahresdurchschnitt.")
+                    st.error(f"🔴 **VORSICHT:** Die Aktie notiert unter ihrem Jahresdurchschnitt (Abwärtstrend).")
 
             else:
-                st.error("Konnte keine Daten für dieses Symbol finden.")
+                st.error("Keine Daten gefunden.")
         else:
-            st.error("Aktie wurde nicht gefunden. Probiere es mit dem Kürzel (z.B. TSLA).")
+            st.error("Aktie wurde nicht gefunden.")
 
 st.sidebar.markdown("---")
-st.sidebar.write("Die Empfehlung basiert auf der Kombination von Trend (SMA 200) und Dynamik (RSI).")
+st.sidebar.write("📖 **Profi-Tipp:** Steigt der Kurs bei **hohem Volumen** (grüne Balken), ist das ein starkes Kaufsignal. Fällt er bei hohem Volumen (rote Balken), ist Vorsicht geboten.")
