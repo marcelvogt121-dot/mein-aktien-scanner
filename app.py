@@ -24,11 +24,11 @@ def get_ticker(search_term):
         return None, None
 
 if st.sidebar.button("Analyse starten"):
-    with st.spinner('Lade Marktdaten & Analysten-Meinungen...'):
+    with st.spinner('Lade Marktdaten...'):
         symbol, name = get_ticker(user_input)
-        ticker_obj = yf.Ticker(symbol)
         
         if symbol:
+            ticker_obj = yf.Ticker(symbol)
             # 1. Kursdaten laden
             data = ticker_obj.history(period="5y")
             
@@ -36,48 +36,50 @@ if st.sidebar.button("Analyse starten"):
                 current_price = data['Close'].iloc[-1]
                 sma200 = data['Close'].rolling(window=200).mean().iloc[-1]
                 
-                # 2. Analysten-Empfehlungen abrufen
-                rec = ticker_obj.recommendations
-                
                 st.subheader(f"Analyse für: {name} ({symbol})")
                 
-                # --- DIE AMPEL LOGIK ---
+                # --- DIE NEUE AMPEL LOGIK (SICHERER) ---
                 st.markdown("### 🚦 Analysten-Ampel")
-                if rec is not None and not rec.empty:
-                    # Wir nehmen die aktuellste Zeile der Empfehlungen
-                    latest_rec = rec.iloc[-1]
-                    buy = latest_rec.get('strongBuy', 0) + latest_rec.get('buy', 0)
-                    hold = latest_rec.get('hold', 0)
-                    sell = latest_rec.get('sell', 0) + latest_rec.get('strongSell', 0)
+                
+                # Wir versuchen die Empfehlung aus den 'info' Daten zu lesen
+                try:
+                    info = ticker_obj.info
+                    rec_key = info.get('recommendationKey', 'Keine Daten').replace('_', ' ').title()
+                    target_price = info.get('targetMeanPrice', 'N/A')
                     
-                    col_a, col_b, col_c = st.columns(3)
-                    col_a.metric("Kaufen", f"{buy} Profis")
-                    col_b.metric("Halten", f"{hold} Profis")
-                    col_c.metric("Verkaufen", f"{sell} Profis")
-
-                    if buy > sell and buy > hold:
-                        st.success("🟢 **AMPELEMPFEHLUNG: KAUFEN** - Die Mehrheit der Analysten ist optimistisch.")
-                    elif sell > buy:
-                        st.error("🔴 **AMPELEMPFEHLUNG: VERKAUFEN** - Die Experten raten zur Vorsicht.")
+                    col_a, col_b = st.columns(2)
+                    
+                    # Farbauswahl für die Ampel
+                    if "Buy" in rec_key:
+                        st.success(f"🟢 **Empfehlung: {rec_key}**")
+                    elif "Sell" in rec_key:
+                        st.error(f"🔴 **Empfehlung: {rec_key}**")
                     else:
-                        st.warning("🟡 **AMPELEMPFEHLUNG: HALTEN** - Es gibt aktuell keine klare Richtung.")
-                else:
-                    st.info("Keine aktuellen Analysten-Daten für dieses Symbol verfügbar.")
+                        st.warning(f"🟡 **Empfehlung: {rec_key}**")
+                        
+                    st.write(f"Durchschnittliches Kursziel der Profis: **{target_price} $**")
+                except:
+                    st.info("Analysten-Zusammenfassung aktuell nicht verfügbar.")
 
                 # --- DER CHART ---
                 plot_data = data['Close'].tail(252 if zeitraum == "1y" else 504 if zeitraum == "2y" else 1260)
+                vol_data = data['Volume'].loc[plot_data.index]
+                
                 fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.05, row_heights=[0.7, 0.3])
-                fig.add_trace(go.Scatter(x=plot_data.index, y=plot_data, name='Preis'), row=1, col=1)
-                fig.add_trace(go.Bar(x=plot_data.index, y=data['Volume'].loc[plot_data.index], name='Volumen'), row=2, col=1)
-                fig.update_layout(height=500, template="plotly_white")
+                fig.add_trace(go.Scatter(x=plot_data.index, y=plot_data, name='Preis', line=dict(color='#1f77b4')), row=1, col=1)
+                fig.add_trace(go.Bar(x=plot_data.index, y=vol_data, name='Volumen', marker_color='#d3d3d3'), row=2, col=1)
+                
+                fig.update_layout(height=600, template="plotly_white", showlegend=False)
                 st.plotly_chart(fig, use_container_width=True)
 
-                # --- FAZIT ---
+                # --- TREND-CHECK ---
                 st.markdown("---")
                 if current_price > sma200:
-                    st.write("✅ **Trend-Check:** Die Aktie notiert über ihrem Jahresdurchschnitt (Aufwärtstrend).")
+                    st.success(f"📈 **Trend:** Die Aktie ist im Aufwärtstrend (über SMA 200 von {sma200:.2f} $)")
                 else:
-                    st.write("❌ **Trend-Check:** Die Aktie notiert unter ihrem Jahresdurchschnitt (Abwärtstrend).")
+                    st.error(f"📉 **Trend:** Die Aktie ist im Abwärtstrend (unter SMA 200 von {sma200:.2f} $)")
 
             else:
-                st.error("Keine Daten gefunden.")
+                st.error("Keine Kursdaten gefunden.")
+        else:
+            st.error("Aktie wurde nicht gefunden.")
