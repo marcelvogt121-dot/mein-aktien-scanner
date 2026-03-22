@@ -40,29 +40,47 @@ if st.sidebar.button("Analyse starten"):
                 # --- ANALYSTEN AMPEL ---
                 try:
                     info = ticker_obj.info
-                    rec_key = info.get('recommendationKey', 'N/A').replace('_', ' ').title()
-                    st.markdown(f"**Analysten-Meinung:** {rec_key}")
+                    # Sicherere Abfrage der Empfehlung
+                    rec_key = info.get('recommendationKey', 'Keine Daten verfügbar').replace('_', ' ').title()
+                    
+                    if "Buy" in rec_key:
+                        st.success(f"🟢 **Analysten-Meinung:** {rec_key}")
+                    elif "Sell" in rec_key:
+                        st.error(f"🔴 **Analysten-Meinung:** {rec_key}")
+                    else:
+                        st.warning(f"🟡 **Analysten-Meinung:** {rec_key}")
                 except:
-                    st.info("Keine Empfehlungs-Daten.")
+                    st.info("Analysten-Zusammenfassung aktuell nicht verfügbar.")
 
                 # --- CHART ---
                 plot_data = data['Close'].tail(252 if zeitraum == "1y" else 504 if zeitraum == "2y" else 1260)
                 fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.05, row_heights=[0.7, 0.3])
-                fig.add_trace(go.Scatter(x=plot_data.index, y=plot_data, name='Preis'), row=1, col=1)
+                fig.add_trace(go.Scatter(x=plot_data.index, y=plot_data, name='Preis', line=dict(color='#1f77b4')), row=1, col=1)
                 fig.add_trace(go.Bar(x=plot_data.index, y=data['Volume'].loc[plot_data.index], name='Volumen', marker_color='lightgray'), row=2, col=1)
                 fig.update_layout(height=500, template="plotly_white", showlegend=False)
                 st.plotly_chart(fig, use_container_width=True)
 
-                # --- NEWS SEKTION ---
+                # --- NEWS SEKTION (REPARIERT) ---
                 st.markdown("---")
                 st.subheader(f"📰 Aktuelle News zu {name}")
-                news = ticker_obj.news
-                if news:
-                    for item in news[:5]: # Zeige die Top 5 News
-                        with st.expander(item['title']):
-                            st.write(f"**Quelle:** {item['publisher']}")
-                            st.write(f"**Link:** [Zum Artikel]({item['link']})")
-                else:
-                    st.write("Keine aktuellen News gefunden.")
+                try:
+                    news = ticker_obj.news
+                    if news:
+                        for item in news[:5]:
+                            # .get() verhindert den KeyError, falls 'title' oder 'link' fehlt
+                            title = item.get('title', 'Nachricht ohne Titel')
+                            link = item.get('link', '#')
+                            publisher = item.get('publisher', 'Unbekannte Quelle')
+                            
+                            with st.expander(title):
+                                st.write(f"**Quelle:** {publisher}")
+                                if link != '#':
+                                    st.write(f"**Link:** [Zum Artikel lesen]({link})")
+                    else:
+                        st.write("Keine aktuellen News gefunden.")
+                except:
+                    st.write("News-Feed konnte nicht geladen werden.")
             else:
                 st.error("Keine Kursdaten gefunden.")
+        else:
+            st.error("Aktie wurde nicht gefunden.")
