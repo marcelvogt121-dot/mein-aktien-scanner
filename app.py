@@ -23,18 +23,16 @@ zeitraum = st.sidebar.selectbox("Zeitraum für Chart", ["1y", "2y", "5y"], index
 st.sidebar.markdown("---")
 st.sidebar.header("⭐ Meine Favoriten")
 
-# Button zum Hinzufügen des aktuellen Inputs
 if st.sidebar.button("Zu Favoriten hinzufügen"):
     symbol_to_add = user_input.upper()
     if symbol_to_add not in st.session_state['favorites']:
         st.session_state['favorites'].append(symbol_to_add)
         st.sidebar.success(f"{symbol_to_add} gespeichert!")
 
-# Favoritenliste anzeigen und klickbar machen
 if st.session_state['favorites']:
     selected_fav = st.sidebar.selectbox("Gespeicherte Aktien auswählen:", st.session_state['favorites'])
     if st.sidebar.button("Favorit laden"):
-        user_input = selected_fav # Setzt den Input auf den Favoriten
+        user_input = selected_fav 
 
 if st.sidebar.button("Favoritenliste leeren"):
     st.session_state['favorites'] = []
@@ -130,12 +128,23 @@ if st.sidebar.button("Analyse starten"):
                 fig.update_layout(height=600, template="plotly_white", hovermode='x unified', showlegend=False)
                 st.plotly_chart(fig, use_container_width=True)
 
-                # Fazit
+                # --- TURNAROUND & KAUF-LOGIK ---
                 st.markdown("---")
+                st.subheader("💡 Strategische Einschätzung")
+                
                 if current_price > current_sma200:
-                    st.write("✅ **Trend:** Die Aktie ist im langfristigen Aufwärtstrend.")
+                    if last_rsi < 35:
+                        st.success("✅ **STARKES KAUFSIGNAL:** Die Aktie ist im Aufwärtstrend, aber kurzfristig extrem günstig (RSI niedrig).")
+                    else:
+                        st.info("⚖️ **Trendfolge:** Aktie ist stabil. Kein dringender Handlungsbedarf.")
                 else:
-                    st.write("❌ **Trend:** Die Aktie ist im langfristigen Abwärtstrend.")
+                    # Logik für Turnaround
+                    if current_price > (current_sma200 * 0.93) and last_rsi > 45:
+                        st.warning("🔄 **TURNAROUND-CHANCE:** Die Aktie greift den SMA 200 von unten an. Wenn der Kurs die orange Linie nach oben durchbricht, ist das ein klassisches Kaufsignal nach einem langen Fall!")
+                    elif last_rsi < 30:
+                        st.error("🔴 **Bodenlose Fall:** RSI ist zwar niedrig, aber der Trend ist noch tiefrot. Warte auf erste grüne Volumenbalken oder einen RSI-Anstieg über 40.")
+                    else:
+                        st.error("❌ **Kein Kauf:** Die Aktie steckt tief im Abwärtstrend fest.")
             else:
                 st.error("Keine Daten gefunden.")
         else:
